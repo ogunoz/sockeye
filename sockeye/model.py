@@ -345,7 +345,7 @@ class SockeyeModel(mx.gluon.Block):
         for k in new_params:
             assert new_params[k]._data is not None, "Parameter '%s' is not initialized in new_params dictionary." % k
             if not ignore_extra and k not in model_params:
-                raise ValueError("Parameter '%s' in new_params dictionary is not preset in ParameterDict. "
+                raise ValueError("Parameter '%s' in new_params dictionary is not present in parameter dictionary. "
                                  "Set ignore_extra=True to ignore." % k)
             if k in model_params:
                 assert model_params[k]._data is not None, "Parameter '%s' must be initialized before it can be reset " \

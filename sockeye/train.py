@@ -699,7 +699,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
 
 
 def set_grad_req_for_fixed_params(config: model.ModelConfig,
-                                  params: mx.gluon.ParameterDict,
+                                  params: Dict[str, mx.gluon.Parameter],
                                   fixed_param_names: List[str],
                                   fixed_param_strategy: Optional[str] = None):
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
@@ -723,7 +723,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
 
 
 def fixed_param_names_from_stragegy(config: model.ModelConfig,
-                                    params: Union[Dict, mx.gluon.ParameterDict],
+                                    params: Dict[str, mx.gluon.Parameter],
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and

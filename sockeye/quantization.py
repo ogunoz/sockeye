@@ -13,6 +13,7 @@
 
 import logging
 import math
+from typing import Dict
 
 import mxnet as mx
 from mxnet.gluon.nn.activations import Activation
@@ -79,7 +80,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
         will be inferred from the shape of input data.
     prefix : str or None
         See document of `Block`.
-    params : ParameterDict or None
+    params : Parameter dictionary or None
         See document of `Block`.
 
 
@@ -204,7 +205,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
     return b_max
 
 
-def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_store: str):
+def convert_weights_disk_format(params: Dict[str, mx.gluon.Parameter], dtype_store: str):
     """
     Convert weights from float32 MXNet format (B^T in float32) to disk format
     (B^T in int8 format).
@@ -227,7 +228,7 @@ def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_
                     param.dtype = C.DTYPE_INT8
 
 
-def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
+def convert_weights_cpu_dependent(params: Dict[str, mx.gluon.Parameter]):
     """
     Convert weights from disk format to intgemm's CPU-dependent format for
     quantized matrix multiplication.
@@ -242,7 +243,7 @@ def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
             if scaling_name in params:
                 if param.dtype == C.DTYPE_INT8:
                     # Already fully quantized, just rearrange.
-                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True)
+                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized=True)
                 else:
                     # Use offline scaling factor if available.
                     b_max = extract_quant_max(param, params[scaling_name])

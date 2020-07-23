@@ -107,8 +107,6 @@ class OutputLayer(mx.gluon.HybridBlock):
     :param weight_initializer: Initializer for weight.
     :param bias_initializer: Initializer for bias.
     :param dtype: Data type.
-    :param prefix: Prefix used for naming.
-    :params params: Optional parameter dict for shared parameters.
     """
 
     def __init__(self,
@@ -117,33 +115,37 @@ class OutputLayer(mx.gluon.HybridBlock):
                  weight: Optional[mx.gluon.Parameter] = None,
                  weight_initializer: Optional[str] = None,
                  bias_initializer: str = 'zeros',
-                 dtype: str = C.DTYPE_FP32,
-                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
-        super().__init__(prefix=prefix)
+                 dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__()
         self.vocab_size = vocab_size
 
-        with self.name_scope():
-            if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling', shape=(1,), init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32, allow_deferred_init=False)
-                # This is only for inference but MXNet tries to create an
-                # initializer anyway, then fails because most random
-                # generators don't support int8 output.
-                weight_initializer = 'zeros'
-            if weight is None:
-                self.weight = self.params.get("weight",
-                                              shape=(vocab_size, hidden_size),
-                                              init=weight_initializer,
-                                              dtype=dtype,
+        if dtype == C.DTYPE_INT8:
+            self.scaling = mx.gluon.Parameter("scaling",
+                                              shape=(1,),
+                                              init=mx.initializer.Constant(-1.0),
+                                              dtype=C.DTYPE_FP32,
                                               allow_deferred_init=False)
-            else:
-                self.weight = weight  # adds to self._reg_params
-                self.params.update({weight.name: weight})  # adds to self.params
+            # This is only for inference but MXNet tries to create an
+            # initializer anyway, then fails because most random
+            # generators don't support int8 output.
+            weight_initializer = 'zeros'
+        if weight is None:
+            self.weight = mx.gluon.Parameter("weight",
+                                             shape=(vocab_size, hidden_size),
+                                             init=weight_initializer,
+                                             dtype=dtype,
+                                             allow_deferred_init=False)
+        else:
+            self.weight = weight  # adds to self._reg_params
+            # TODO: understand parameter sharing in MXNet 2.0 (self.share_parameters()?)
+            # TODO: needed? self.params.update({weight.name: weight})  # adds to self.params
 
-            self.bias = self.params.get("bias",
-                                        shape=(vocab_size,),
-                                        init=bias_initializer,
-                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32, # Bias stays fp32 even with int8 weights.
-                                        allow_deferred_init=False)
+        self.bias = mx.gluon.Parameter("bias",
+                                       shape=(vocab_size,),
+                                       init=bias_initializer,
+                                       # Bias stays fp32 even with int8 weights.
+                                       dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32,
+                                       allow_deferred_init=False)
 
     @lru_cache(maxsize=1)
     def _take_slice(self, vocab_slice_ids: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
@@ -168,11 +170,10 @@ class OutputLayer(mx.gluon.HybridBlock):
                                             num_hidden=vocab_slice_ids.shape[0],
                                             weight=weight,
                                             bias=bias,
-                                            flatten=False,
-                                            name=C.LOGITS_NAME)
+                                            flatten=False)
         return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, bias, scaling = None):
+    def hybrid_forward(self, F, data, weight, bias, scaling=None):
         if self.weight.dtype == C.DTYPE_INT8:
             return F.contrib.intgemm_fully_connected(data=data,
                                     num_hidden=self.vocab_size,
