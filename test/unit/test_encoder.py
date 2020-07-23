@@ -28,7 +28,7 @@ import sockeye.transformer
 ])
 def test_embedding_encoder(dropout, factor_configs, is_source):
     config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
-    embedding = sockeye.encoder.Embedding(config, prefix='embedding', is_source=is_source)
+    embedding = sockeye.encoder.Embedding(config, is_source=is_source)
     assert type(embedding) == sockeye.encoder.Embedding
 
 
@@ -37,7 +37,6 @@ def test_embedding_encoder(dropout, factor_configs, is_source):
     (True,)
 ])
 def test_get_transformer_encoder(lhuc):
-    prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
                                                    feed_forward_num_hidden=30,
@@ -52,9 +51,8 @@ def test_get_transformer_encoder(lhuc):
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
                                                    lhuc=lhuc)
-    encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix, dtype = C.DTYPE_FP32)
+    encoder = sockeye.encoder.get_transformer_encoder(config, dtype=C.DTYPE_FP32)
     encoder.initialize()
     encoder.hybridize(static_alloc=True)
 
     assert type(encoder) == sockeye.encoder.TransformerEncoder
-    assert encoder.prefix == prefix + C.TRANSFORMER_ENCODER_PREFIX

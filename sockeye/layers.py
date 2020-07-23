@@ -128,9 +128,8 @@ class OutputLayer(mx.gluon.HybridBlock):
                                              dtype=dtype,
                                              allow_deferred_init=False)
         else:
-            self.weight = weight  # adds to self._reg_params
+            self.weight = weight
             # TODO: understand parameter sharing in MXNet 2.0 (self.share_parameters()?)
-            # TODO: needed? self.params.update({weight.name: weight})  # adds to self.params
 
         self.bias = mx.gluon.Parameter("bias",
                                        shape=(vocab_size,),

@@ -143,21 +143,21 @@ class Embedding(Encoder):
         self._dtype = dtype
 
         if embed_weight is None:
-            self.embed_weight = self.params.get('weight',
-                                                shape=(self.config.vocab_size, self.config.num_embed),
-                                                grad_stype='row_sparse',
-                                                dtype=dtype)
+            self.embed_weight = mx.gluon.Parameter('weight',
+                                                   shape=(self.config.vocab_size, self.config.num_embed),
+                                                   grad_stype='row_sparse',
+                                                   dtype=dtype)
             self._use_sparse_grad = self.config.allow_sparse_grad
         else:
-            self.embed_weight = embed_weight  # adds to self._reg_params
-            self.params.update({embed_weight.name: embed_weight})  # adds to self.params
+            self.embed_weight = embed_weight
+            # TODO: understand parameter sharing in MXNet 2.0 (self.share_parameters()?)
             self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
         if self.config.factor_configs is not None:
             for i, fc in enumerate(self.config.factor_configs):
                 factor_weight_name = 'factor%d_weight' % i
                 factor_weight = embed_weight if fc.share_source_embedding else \
-                    self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
+                    mx.gluon.Parameter('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
                 # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
                 setattr(self, factor_weight_name, factor_weight)
 
@@ -289,9 +289,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     :param config: Configuration for transformer encoder.
     """
 
-    def __init__(self,
-                 config: transformer.TransformerConfig,
-                 dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, config: transformer.TransformerConfig, dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.config = config
 
