@@ -60,7 +60,7 @@ class LHUC(mx.gluon.HybridBlock):
                  num_hidden: int,
                  weight_init: Union[str, mx.init.Initializer] = mx.init.Uniform(0.1)) -> None:
         super().__init__()
-        self.weight = self.params.get('weight', shape=(num_hidden,), init=weight_init)
+        self.weight = mx.gluon.Parameter('weight', shape=(num_hidden,), init=weight_init)
 
     def hybrid_forward(self, F, data, weight) -> mx.sym.Symbol:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
