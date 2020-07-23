@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only, prefix, dtype)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, dtype: str = C.DTYPE_FP32) -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only, dtype)
 
 
 class Decoder(mx.gluon.Block):
@@ -42,32 +42,30 @@ class Decoder(mx.gluon.Block):
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
 
-    __registry = {}  # type: Dict[Type[DecoderConfig], Tuple[Type['Decoder'], str]]
+    __registry = {}  # type: Dict[Type[DecoderConfig], Type['Decoder']]
 
     @classmethod
-    def register(cls, config_type: Type[DecoderConfig], suffix: str):
+    def register(cls, config_type: Type[DecoderConfig]):
         """
-        Registers decoder type for configuration. Suffix is appended to decoder prefix.
+        Registers decoder type for configuration.
 
         :param config_type: Configuration type for decoder.
-        :param suffix: String to append to decoder prefix.
 
         :return: Class decorator.
         """
         def wrapper(target_cls):
-            cls.__registry[config_type] = (target_cls, suffix)
+            cls.__registry[config_type] = target_cls
             return target_cls
 
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str, dtype: str) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, dtype: str) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
-        :param inference_ony: Create a decoder that is only used for inference.
-        :param prefix: Prefix to prepend for decoder.
+        :param inference_only: Create a decoder that is only used for inference.
         :param dtype: Data type for weights.
 
         :return: Decoder instance.
@@ -75,9 +73,8 @@ class Decoder(mx.gluon.Block):
         config_type = type(config)
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
-        decoder_cls, suffix = cls.__registry[config_type]
-        # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)
+        decoder_cls = cls.__registry[config_type]
+        return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)
 
     @abstractmethod
     def __init__(self):
@@ -110,7 +107,7 @@ class Decoder(mx.gluon.Block):
         raise NotImplementedError()
 
 
-@Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
+@Decoder.register(transformer.TransformerConfig)
 class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
@@ -121,38 +118,33 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     time-step ensures correct self-attention scores and is updated with every step.
 
     :param config: Transformer configuration.
-    :param prefix: Name prefix for symbols of this decoder.
     :param inference_only: Only use the model for inference enabling some optimizations, such as disabling the auto-regressive mask.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_DECODER_PREFIX,
                  inference_only: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         Decoder.__init__(self)
-        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
+        mx.gluon.HybridBlock.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        with self.name_scope():
-            self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                             num_embed=self.config.model_size,
-                                                             max_seq_len=self.config.max_seq_len_target,
-                                                             prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX,
-                                                             scale_up_input=True,
-                                                             scale_down_positions=False)
-            self.autoregressive_bias = transformer.AutoRegressiveBias(prefix="autoregressive_bias_")
-            self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
-                                                                            fold_heads=False,
-                                                                            name="bias")
-            self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i, dtype=dtype))
 
-            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                     dropout=config.dropout_prepost,
-                                                                     prefix="final_process_",
-                                                                     num_hidden=self.config.model_size)
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_target,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False)
+        self.autoregressive_bias = transformer.AutoRegressiveBias()
+        self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
+                                                                        fold_heads=False)
+        self.layers = mx.gluon.nn.HybridSequential()
+        for i in range(config.num_layers):
+            self.layers.add(transformer.TransformerDecoderBlock(config, dtype=dtype))
+
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=self.config.model_size)
 
     def state_structure(self) -> str:
         """

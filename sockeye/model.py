@@ -97,44 +97,39 @@ class SockeyeModel(mx.gluon.Block):
 
     :param config: Model configuration.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, inference_only: bool = False, prefix: str = '', **kwargs) -> None:
-        super().__init__(prefix=prefix, **kwargs)
+    def __init__(self, config: ModelConfig, inference_only: bool = False) -> None:
+        super().__init__()
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
 
-        with self.name_scope():
-            # source & target embeddings
-            self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
+        # source & target embeddings
+        self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
 
-            self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                      prefix=self.prefix,
-                                                      is_source=True,
-                                                      embed_weight=self.source_embed_weight)
-            self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                      prefix=self.prefix,
-                                                      is_source=False,
-                                                      embed_weight=self.target_embed_weight)
+        self.embedding_source = encoder.Embedding(config.config_embed_source,
+                                                  is_source=True,
+                                                  embed_weight=self.source_embed_weight)
+        self.embedding_target = encoder.Embedding(config.config_embed_target,
+                                                  is_source=False,
+                                                  embed_weight=self.target_embed_weight)
 
-            # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                               prefix=self.prefix, dtype=config.dtype)
+        # encoder & decoder first (to know the decoder depth)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, dtype=config.dtype)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                           dtype=config.dtype)
 
-            self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                   vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype=config.dtype)
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                               vocab_size=self.config.vocab_target_size,
+                                               weight=self.output_weight, dtype=config.dtype)
 
-            self.length_ratio = None
-            if self.config.config_length_task is not None:
-                utils.check_condition(self.config.config_length_task.weight > 0.0,
-                                      'Auxiliary length task requested, but its loss weight is zero')
-                self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                       num_layers=self.config.config_length_task.num_layers,
-                                                       prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+        self.length_ratio = None
+        if self.config.config_length_task is not None:
+            utils.check_condition(self.config.config_length_task.weight > 0.0,
+                                  'Auxiliary length task requested, but its loss weight is zero')
+            self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                   num_layers=self.config.config_length_task.num_layers)
 
     def cast(self, dtype):
         self.dtype = dtype
