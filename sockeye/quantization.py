@@ -104,24 +104,24 @@ class QuantizableDense(mx.gluon.HybridBlock):
         self._units = units
         self._in_units = in_units
         if dtype == C.DTYPE_INT8:
-            self.scaling = self.params.get('scaling', shape=(1,),
-                                           #Initialize to an obviously wrong value so we can detect later
-                                           init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
-                                           allow_deferred_init=True)
-            weight_initializer = 'zeros' # Most initializers don't work for int8, but this is for inference anyway.
+            self.scaling = mx.gluon.Parameter('scaling', shape=(1,),
+                                              # initialize to an obviously wrong value so we can detect later
+                                              init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
+                                              allow_deferred_init=True)
+            weight_initializer = 'zeros'  # most initializers don't work for int8, but this is for inference anyway.
 
-        self.weight = self.params.get('weight', shape=(units, in_units),
-                                      init=weight_initializer, dtype=dtype,
-                                      allow_deferred_init=True)
+        self.weight = mx.gluon.Parameter('weight', shape=(units, in_units),
+                                         init=weight_initializer, dtype=dtype,
+                                         allow_deferred_init=True)
 
         if use_bias:
-            self.bias = self.params.get('bias', shape=(units,),
-                                        init=bias_initializer, dtype = C.DTYPE_FP32,
-                                        allow_deferred_init=True)
+            self.bias = mx.gluon.Parameter('bias', shape=(units,),
+                                           init=bias_initializer, dtype = C.DTYPE_FP32,
+                                           allow_deferred_init=True)
         else:
             self.bias = None
         if activation is not None:
-            self.act = Activation(activation, prefix=activation+'_')
+            self.act = Activation(activation)
         else:
             self.act = None
 
@@ -130,7 +130,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
             self._dtype = dtype
             super(QuantizableDense, self).cast(dtype)
         else:
-            #No casting an already quantized matrix.
+            # No casting an already quantized matrix.
             logger.warning("Ignoring casting on int8 matrix")
 
     def hybrid_forward(self, F, x, weight, scaling=None, bias=None):
@@ -142,8 +142,8 @@ class QuantizableDense(mx.gluon.HybridBlock):
                 act = F.contrib.intgemm_fully_connected(x, weight, scaling, no_bias=True, num_hidden=self._units,
                                                         flatten=self._flatten, name='fwd')
         else:
-            #Newer MXNet allows a numpy array.
-            #fc = F.npx.fully_connected if is_np_array() else F.FullyConnected
+            # Newer MXNet allows a numpy array.
+            # fc = F.npx.fully_connected if is_np_array() else F.FullyConnected
             act = F.FullyConnected(x, weight, bias, no_bias=bias is None, num_hidden=self._units,
                      flatten=self._flatten, name='fwd')
         if self.act is not None:
