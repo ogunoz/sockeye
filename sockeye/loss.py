@@ -39,13 +39,14 @@ class Loss(mx.gluon.HybridBlock):
                  output_name: str,
                  label_name: str,
                  weight: float = 1.0) -> None:
-        super().__init__(prefix=name)
+        super().__init__()
+        self.name = name
         self._output_name = output_name
         self._label_name = label_name
         self._weight = weight
         self._metric = None
         logger.info("Loss: %s | weight=%.2f | metric: %s | output_name: '%s' | label_name: '%s'",
-                    self.prefix, self.weight, self.metric.name, self.output_name, self.label_name)
+                    self.name, self.weight, self.metric.name, self.output_name, self.label_name)
 
     def forward(self, outputs: Dict[str, Any], labels: Dict[str, Any]):
         """
