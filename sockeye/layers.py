@@ -81,9 +81,9 @@ class WeightNormalization(mx.gluon.HybridBlock):
 
     def __init__(self, num_hidden: int, ndim: int = 2) -> None:
         super().__init__()
-        self.scale = self.params.get("scale",
-                                     shape=tuple([num_hidden] + [1] * (ndim - 1)),
-                                     init=mx.init.Constant(value=1.0))
+        self.scale = mx.gluon.Parameter(name="scale",
+                                        shape=tuple([num_hidden] + [1] * (ndim - 1)),
+                                        init=mx.init.Constant(value=1.0))
 
     def hybrid_forward(self, F, weight, scale):
         return F.broadcast_mul(lhs=F.L2Normalization(weight, mode='instance'), rhs=scale)
@@ -684,9 +684,9 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
             pos_weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
             if self.scale_down_positions:
                 pos_weight *= self.num_embed ** -0.5
-            self.weight = self.params.get_constant('weight', pos_weight)
+            self.weight = mx.gluon.Constant(value=pos_weight)
         elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            self.weight = self.params.get('weight', shape=(self.max_seq_len, self.num_embed), init=weight_init)
+            self.weight = mx.gluon.Parameter('weight', shape=(self.max_seq_len, self.num_embed), init=weight_init)
         else:
             raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
 
