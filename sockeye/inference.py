@@ -241,9 +241,9 @@ class InferenceModel(model.SockeyeModel):
              attention_probs,
              states,
              pointer_scores) = self.decoder.decode_step(decode_step,
-                                                target_embed_prev,
-                                                source_encoded_seq_len,
-                                                *states)
+                                                        target_embed_prev,
+                                                        source_encoded_seq_len,
+                                                        *states)
 
             if self.decoder_return_logit_inputs:
                 # skip output layer in graph
@@ -253,7 +253,7 @@ class InferenceModel(model.SockeyeModel):
                 logits = self.output_layer(target_decoded)
                 if self.config.num_pointers:
                     logits = mx.sym.concat(logits, pointer_scores, dim=1)
-                
+
                 if self.softmax_temperature is not None:
                     logits = logits / self.softmax_temperature
                 if self.skip_softmax:
@@ -372,7 +372,8 @@ class InferenceModel(model.SockeyeModel):
         max_src_len = self.encoder.get_max_seq_len()
         if self.config.num_pointers > 0:
             # Constraint given by the attention-based pointer mechanism
-            max_src_len = self.config.num_pointers if max_src_len is None else min(max_src_len, self.config.num_pointers)
+            max_src_len = self.config.num_pointers if max_src_len is None else min(max_src_len,
+                                                                                   self.config.num_pointers)
         return max_src_len
 
     @property
@@ -674,7 +675,7 @@ class TranslatorInput:
 
     def __str__(self):
         return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
+               % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
 
     def __len__(self):
         return len(self.tokens)
@@ -765,6 +766,7 @@ def make_input_from_json_string(sentence_id: SentenceId,
     :param translator: A translator object.
     :return: A TranslatorInput.
     """
+
     try:
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
         return make_input_from_dict(sentence_id, jobj, translator)
@@ -834,7 +836,11 @@ def make_input_from_dict(sentence_id: SentenceId,
         if isinstance(avoid_list, list):
             avoid_list = [list(data_io.get_tokens(phrase)) for phrase in avoid_list]
         if isinstance(constraints, list):
-            constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
+            formatted_constraints = []
+            for c in constraints:
+                formatted_constraints.append([list(data_io.get_tokens(x)) for x in c])
+                
+            constraints = formatted_constraints
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
                                restrict_lexicon=restrict_lexicon, constraints=constraints,
@@ -940,7 +946,7 @@ class TranslatorOutput:
                  tokens: Tokens,
                  attention_matrix: np.ndarray,
                  score: float,
-                 pass_through_dict: Optional[Dict[str,Any]] = None,
+                 pass_through_dict: Optional[Dict[str, Any]] = None,
                  beam_histories: Optional[List[BeamHistory]] = None,
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
@@ -998,7 +1004,6 @@ class NBestTranslations:
                  target_ids_list: List[TokenIds],
                  attention_matrices: List[np.ndarray],
                  scores: List[float]) -> None:
-
         self.target_ids_list = target_ids_list
         self.attention_matrices = attention_matrices
         self.scores = scores
@@ -1051,7 +1056,6 @@ Translation of a chunk of a sentence.
 :param chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
 :param input: The translator input.
 """
-
 
 IndexedTranslation = NamedTuple('IndexedTranslation', [
     ('input_idx', int),
@@ -1282,9 +1286,10 @@ def _concat_translations(translations: List[Translation],
         return 0.0 if brevity_penalty is None else brevity_penalty.get(hypothesis_length, reference_length)
 
     # Unnormalize + sum and renormalize the score:
-    score = sum((translation.score + _brevity_penalty(len(translation.target_ids), translation.estimated_reference_length)) \
-                    * length_penalty.get(len(translation.target_ids))
-                 for translation in translations)
+    score = sum(
+        (translation.score + _brevity_penalty(len(translation.target_ids), translation.estimated_reference_length)) \
+        * length_penalty.get(len(translation.target_ids))
+        for translation in translations)
     score = score / length_penalty.get(len(target_ids)) - _brevity_penalty(len(target_ids), estimated_reference_length)
     return Translation(target_ids, attention_matrix_combined, score, beam_histories,
                        estimated_reference_length=estimated_reference_length)
@@ -1525,11 +1530,13 @@ class Translator:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                            translation=empty_translation(
+                                                                add_nbest=(self.nbest_size > 1))))
             # empty input
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                            translation=empty_translation(
+                                                                add_nbest=(self.nbest_size > 1))))
             else:
                 # TODO(tdomhan): Remove branch without EOS with next major version bump, as future models will always be trained with source side EOS symbols
                 if self.source_with_eos:
@@ -1569,11 +1576,11 @@ class Translator:
                                                                    chunk_idx=0,
                                                                    translator_input=trans_input))
 
-            if trans_input.constraints is not None:
-                logger.info("Input %s has %d %s: %s", trans_input.sentence_id,
-                            len(trans_input.constraints),
-                            "constraint" if len(trans_input.constraints) == 1 else "constraints",
-                            ", ".join(" ".join(x) for x in trans_input.constraints))
+            #if trans_input.constraints is not None:
+            #    logger.info("Input %s has %d %s: %s", trans_input.sentence_id,
+            #                len(trans_input.constraints),
+            #                "constraint" if len(trans_input.constraints) == 1 else "constraints",
+            #                ", ".join(" ".join(x) for x in trans_input.constraints))
 
         num_bad_empty = len(translated_chunks)
 
@@ -1630,8 +1637,10 @@ class Translator:
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
                                                                            Optional[lexicon.TopKLexicon],
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]],
+                                                                           List[
+                                                                               Optional[constrained.RawConstraintList]],
+                                                                           List[
+                                                                               Optional[constrained.RawConstraintList]],
                                                                            mx.nd.NDArray]:
         """
         Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
@@ -1655,7 +1664,8 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)
-            max_output_lengths.append(self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
+            max_output_lengths.append(
+                self.models[0].get_max_output_length(data_io.get_bucket(num_tokens, self.buckets_source)))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1689,8 +1699,20 @@ class Translator:
                     restrict_lexicon = self.restrict_lexicon
 
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
-                                      trans_input.constraints]
+                # c is
+                seqs_for_cons = [] # type: [constrained.RawConstraintList]
+                for c in trans_input.constraints:
+
+                    c_sequences = []
+                    for sequence in c:
+                        ids = data_io.tokens2ids(sequence, self.vocab_target)
+                        c_sequences.append(ids)
+
+                    seqs_for_cons.append(c_sequences)
+                raw_constraints[j] = seqs_for_cons
+
+                #raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                #                      trans_input.constraints]
 
             if trans_input.avoid_list is not None:
                 raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
@@ -1700,7 +1722,7 @@ class Translator:
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         return source, bucket_key, restrict_lexicon, raw_constraints, raw_avoid_list, \
-                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+               mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1732,9 +1754,9 @@ class Translator:
             nbest_target_ids = translation.nbest_translations.target_ids_list
             target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
             target_strings = [C.TOKEN_SEPARATOR.join(
-                                data_io.ids2tokens(target_ids,
-                                                   self.vocab_target_inv,
-                                                   self.strip_ids)) for target_ids in nbest_target_ids]
+                data_io.ids2tokens(target_ids,
+                                   self.vocab_target_inv,
+                                   self.strip_ids)) for target_ids in nbest_target_ids]
 
             attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in
                                   translation.nbest_translations.attention_matrices]
@@ -1805,9 +1827,8 @@ class Translator:
             else:
                 length_ratios = mx.nd.zeros((num_seq, 1), ctx=self.context)
 
-        encoded_source_length=self.models[0].encoder.get_encoded_seq_len(source_length)
+        encoded_source_length = self.models[0].encoder.get_encoded_seq_len(source_length)
         return model_states, length_ratios * encoded_source_length
-
 
     def _decode_step(self,
                      prev_word: mx.nd.NDArray,
@@ -1835,7 +1856,7 @@ class Translator:
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
             decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
-            
+
             if model.config.num_pointers:
                 # Fill up the predictions up to the maximum number of pointer elements for shorter source sentences
                 (beam_size, target_vocab_size) = decoder_out.shape
@@ -1843,7 +1864,7 @@ class Translator:
                 if diff_size > 0:
                     decoder_out = mx.nd.concat(decoder_out,
                                                mx.nd.zeros((beam_size, diff_size), ctx=self.context), dim=1)
-            
+
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 # Apply output layer outside decoder module.
@@ -2075,11 +2096,11 @@ class Translator:
 
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
             finished, lengths, attention_scores, estimated_reference_lengths \
-                                                = self._sort_by_index.forward(best_hyp_indices,
-                                                                              finished,
-                                                                              lengths,
-                                                                              attention_scores,
-                                                                              estimated_reference_lengths)
+                = self._sort_by_index.forward(best_hyp_indices,
+                                              finished,
+                                              lengths,
+                                              attention_scores,
+                                              estimated_reference_lengths)
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
@@ -2196,7 +2217,7 @@ class Translator:
         nbest_translations = []  # type: List[List[Translation]]
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
         reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
-                                                        else np.full(self.batch_size * self.beam_size, None)
+            else np.full(self.batch_size * self.beam_size, None)
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
@@ -2213,12 +2234,13 @@ class Translator:
             # Obtain sequences for all best hypotheses in the batch
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: np.ndarray
             # pylint: disable=unsubscriptable-object
-            nbest_translations.append([self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
-                                                                                   lengths[best_ids],
-                                                                                   attentions[best_ids],
-                                                                                   seq_scores[best_ids],
-                                                                                   histories,
-                                                                                   reference_lengths[best_ids])])
+            nbest_translations.append(
+                [self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
+                                                             lengths[best_ids],
+                                                             attentions[best_ids],
+                                                             seq_scores[best_ids],
+                                                             histories,
+                                                             reference_lengths[best_ids])])
         # reorder and regroup lists
         reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]
         return reduced_translations
@@ -2271,7 +2293,7 @@ class Translator:
         sequence = sequence[:length].tolist()
         attention_matrix = attention_lists[:length, :]
         score = float(seq_score)
-        estimated_reference_length=float(estimated_reference_length) if estimated_reference_length else None
+        estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
         return Translation(sequence, attention_matrix, score, beam_history_list,
                            nbest_translations=None,

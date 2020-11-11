@@ -18,11 +18,15 @@ from typing import Dict, List, Optional, Tuple, Set
 
 import mxnet as mx
 import numpy as np
+import functools
 
 logger = logging.getLogger(__name__)
 
 # Represents a list of raw constraints for a sentence. Each constraint is a list of target-word IDs.
-RawConstraintList = List[List[int]]
+# RawConstraintList = List[List[int]]
+RawConstraintList = List[List[List[int]]]
+
+print("Sockeye for MC Lex. Cons.")
 
 
 class AvoidTrie:
@@ -30,6 +34,7 @@ class AvoidTrie:
     Represents a set of phrasal constraints for an input sentence.
     These are organized into a trie.
     """
+
     def __init__(self,
                  raw_phrases: Optional[RawConstraintList] = None) -> None:
         self.final_ids = set()  # type: Set[int]
@@ -106,6 +111,7 @@ class AvoidState:
     :param avoid_trie: The trie containing the phrases to avoid.
     :param state: The current state (defaults to root).
     """
+
     def __init__(self,
                  avoid_trie: AvoidTrie,
                  state: AvoidTrie = None) -> None:
@@ -160,6 +166,7 @@ class AvoidBatch:
     :param avoid_list: The list of lists (raw phrasal constraints as IDs, one for each item in the batch).
     :param global_avoid_trie: A translator-level vocabulary of items to avoid.
     """
+
     def __init__(self,
                  batch_size: int,
                  beam_size: int,
@@ -228,28 +235,28 @@ class AvoidBatch:
 
 class ConstrainedHypothesis:
     """
-    Represents a set of words and phrases that must appear in the output.
-    A constraint is of two types: sequence or non-sequence.
-    A non-sequence constraint is a single word and can therefore be followed by anything,
-    whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
-    This class also records which constraints have been met.
+        Represents a set of words and phrases that must appear in the output.
+        A constraint is of two types: sequence or non-sequence.
+        A non-sequence constraint is a single word and can therefore be followed by anything,
+        whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
+        This class also records which constraints have been met.
 
-    A list of raw constraints is maintained internally as two parallel arrays. The following raw constraint
-    represents two phrases that must appear in the output: 14 and 19 35 14.
+        A list of raw constraints is maintained internally as two parallel arrays. The following raw constraint
+        represents two phrases that must appear in the output: 14 and 19 35 14.
 
-        raw constraint: [[14], [19, 35, 14]]
+            raw constraint: [[14], [19, 35, 14]]
 
-    This is represented internally as:
+        This is represented internally as:
 
-        constraints: [14 19 35 14]
-        is_sequence: [False False True True]
+            constraints: [14 19 35 14]
+            is_sequence: [False False True True]
 
-    That is, the constraints are simply concatenated, and we maintain a parallel array indicating whether each
-    token ID must be followed by the next token ID. The same token ID can be present any number of times.
+        That is, the constraints are simply concatenated, and we maintain a parallel array indicating whether each
+        token ID must be followed by the next token ID. The same token ID can be present any number of times.
 
-    :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
-    :param eos_id: The end-of-sentence ID.
-    """
+        :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
+        :param eos_id: The end-of-sentence ID.
+        """
 
     def __init__(self,
                  constraint_list: RawConstraintList,
@@ -258,26 +265,29 @@ class ConstrainedHypothesis:
         # `constraints` records the words of the constraints, as a list (duplicates allowed).
         # `is_sequence` is a parallel array that records, for each corresponding constraint,
         #    whether the current word is the non-final word of a phrasal constraint.
-        self.constraints = []  # type: List[int]
-        self.is_sequence = []  # type: List[bool]
-        for phrase in constraint_list:
-            self.constraints += phrase
-            self.is_sequence += [True] * len(phrase)
-            self.is_sequence[-1] = False
-
-        self.eos_id = eos_id
+        # -1 for last met but a constraint_list can take multiple sequence list? update here
+        # False for constraint is satifsfied completely.
+        self.raw_constraints = []
+        for c in constraint_list:
+            self.raw_constraints.append([(s, -1, False) for s in c])
 
         # no constraints have been met
-        self.met = [False for x in self.constraints]
-        self.last_met = -1
+        self.met = [False for x in constraint_list]
+        self.advanced_constraint = -1
+
+        self.eos_id = eos_id
+        self.longest_sizes = []
+        for c in self.raw_constraints:
+            self.longest_sizes.append(max([len(s[0]) for s in c]))
 
     def __len__(self) -> int:
         """
         :return: The number of constraints.
         """
-        return len(self.constraints)
+        return self.size()
 
     def __str__(self) -> str:
+        return "TO BE UPDATED"
         s = []
         for i, word_id in enumerate(self.constraints):
             s.append(str(word_id) if self.met[i] is False else 'X')
@@ -289,13 +299,19 @@ class ConstrainedHypothesis:
         """
         :return: the number of constraints
         """
-        return len(self.constraints)
+        return functools.reduce(lambda a,b : a+b,self.longest_sizes)
 
     def num_met(self) -> int:
         """
         :return: the number of constraints that have been met.
         """
-        return sum(self.met)
+        total = 0
+        for idx, c in enumerate(self.raw_constraints):
+            if self.met[idx]:
+                total += self.longest_sizes[idx]
+            elif self.advanced_constraint == idx:
+                total += max([s[1] for s in c]) + 1
+        return total
 
     def num_needed(self) -> int:
         """
@@ -313,18 +329,18 @@ class ConstrainedHypothesis:
         :return: The ID of the next required word, or -1 if any word can follow
         """
         items = set()  # type: Set[int]
-        # Add extensions of a started-but-incomplete sequential constraint
-        if self.last_met != -1 and self.is_sequence[self.last_met] == 1:
-            word_id = self.constraints[self.last_met + 1]
-            if word_id != self.eos_id or self.num_needed() == 1:
-                items.add(word_id)
-
-        # Add all constraints that aren't non-initial sequences
+        if self.advanced_constraint > -1:
+            advanced_cons = self.raw_constraints[self.advanced_constraint]
+            started_seqs = list(filter(lambda x: x[1] > -1 and not x[2], advanced_cons))
+            seq_items = [s[0][s[1] + 1] for s in started_seqs]
+            seq_items = list(filter(lambda x:x != self.eos_id or self.num_needed() == 1, seq_items))
+            items.update(seq_items)
         else:
-            for i, word_id in enumerate(self.constraints):
-                if not self.met[i] and (i == 0 or not self.is_sequence[i - 1]):
-                    if word_id != self.eos_id or self.num_needed() == 1:
-                        items.add(word_id)
+            unmet_constraints = list(filter(lambda x: not self.met[x[0]], enumerate(self.raw_constraints)))
+            for i, c in unmet_constraints:
+                seq_items = [s[0][0] for s in c]
+                seq_items = list(filter(lambda x:x != self.eos_id or self.num_needed() == 1, seq_items))
+                items.update(seq_items)
 
         return items
 
@@ -358,39 +374,77 @@ class ConstrainedHypothesis:
         :return: A deep copy of the object, advanced on word_id.
         """
 
+        # incomplete_constraints = list(filter(lambda x: x, self.raw_constraints))
+
         obj = copy.deepcopy(self)
 
         # First, check if we're updating a sequential constraint.
-        if obj.last_met != -1 and obj.is_sequence[obj.last_met] == 1:
-            if word_id == obj.constraints[obj.last_met + 1]:
-                # Here, the word matches what we expect next in the constraint, so we update everything
-                obj.met[obj.last_met + 1] = True
-                obj.last_met += 1
-            else:
-                # Here, the word is not the expected next word of the constraint, so we back out of the constraint.
-                index = obj.last_met
-                while obj.is_sequence[index]:
-                    obj.met[index] = False
-                    index -= 1
-                obj.last_met = -1
+        # if obj.last_met != -1 and obj.is_sequence[obj.last_met] == 1:
+        if obj.advanced_constraint > -1:
+            advanced_cons = obj.raw_constraints[obj.advanced_constraint]
+            is_found = False
+            for ind, seq in enumerate(advanced_cons):
+                if obj.advanced_constraint == -1:
+                    break
+                if seq[2]:
+                    obj.advanced_constraint = -1
+                    continue
+                
+                if word_id == seq[0][seq[1] + 1]:
+                    is_found = True
+                    is_finished = len(seq[0]) == seq[1] + 1 + 1  # maybe remove last +1
+                    # obj.met[obj.advanced_constraint] = is_finished
+
+                    obj.raw_constraints[obj.advanced_constraint][ind] = (seq[0], seq[1] + 1, is_finished)
+
+                    if is_finished:
+                        # if all(x[2] for x in advanced_cons):
+                        obj.met[obj.advanced_constraint] = True
+                        obj.advanced_constraint = -1
+
+                else:
+                    obj.raw_constraints[obj.advanced_constraint][ind] = (seq[0], -1, False)
+
+            if not is_found:
+                obj.advanced_constraint = -1
 
         # If not, check whether we're meeting a single-word constraint
         else:
             # Build a list from all constraints of tuples of the
             # form (constraint, whether it's a non-initial sequential, whether it's been met)
-            constraint_tuples = list(zip(obj.constraints, [False] + obj.is_sequence[:-1], obj.met))
+            # constraint_tuples = list(zip(obj.constraints, [False] + obj.is_sequence[:-1], obj.met))
+
+            list_to_be_queried = []
+            for i, constraint in enumerate(obj.raw_constraints):
+                if self.met[i]:
+                    list_to_be_queried.append([(constraint[0][0][0], False, True)])
+                    continue
+                    
+                sub_list = [(seq[0][0], False, seq[2] or seq[1] != -1) for seq in constraint]
+                list_to_be_queried.append(sub_list)
+
             # We are searching for an unmet constraint (word_id) that is not the middle of a phrase and is not met
             query = (word_id, False, False)
-            try:
-                pos = constraint_tuples.index(query)
-                obj.met[pos] = True
-                obj.last_met = pos
-            except ValueError:
-                # query not found; identical but duplicated object will be returned
-                pass
+
+            is_found = False
+            for cons_id, item_to_be_queried in enumerate(list_to_be_queried):
+                for seq_id, sub_item in enumerate(item_to_be_queried):
+                    if sub_item == query:
+                        is_found = True
+                        found_cons = obj.raw_constraints[cons_id]
+
+                        is_finished = len(found_cons[seq_id][0]) == 1
+                        obj.advanced_constraint = -1 if is_finished else cons_id
+                        if not obj.met[cons_id]:
+                            obj.met[cons_id] = is_finished
+                        obj.raw_constraints[cons_id][seq_id] = (found_cons[seq_id][0], 0, is_finished)
+
+                # constraint met
+                if is_found:
+                    break
 
         return obj
-
+    
 
 def init_batch(raw_constraints: List[Optional[RawConstraintList]],
                beam_size: int,
@@ -404,6 +458,7 @@ def init_batch(raw_constraints: List[Optional[RawConstraintList]],
     :return: A list of ConstrainedHypothesis objects (shape: (batch_size * beam_size,)).
     """
     constraints = [None] * (len(raw_constraints) * beam_size)  # type: List[Optional[ConstrainedHypothesis]]
+    import itertools
     if any(raw_constraints):
         for i, raw_list in enumerate(raw_constraints):
             num_constraints = sum([len(phrase) for phrase in raw_list]) if raw_list is not None else 0
@@ -514,14 +569,14 @@ def topk(timestep: int,
         rows = slice(sentno * beam_size, sentno * beam_size + beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-                hypotheses[rows], inactive[rows] = _sequential_topk(timestep,
-                                                                    beam_size,
-                                                                    inactive[rows],
-                                                                    scores[rows],
-                                                                    hypotheses[rows],
-                                                                    best_ids[rows] - rows.start,
-                                                                    best_word_ids[rows],
-                                                                    seq_scores[rows])
+            hypotheses[rows], inactive[rows] = _sequential_topk(timestep,
+                                                                beam_size,
+                                                                inactive[rows],
+                                                                scores[rows],
+                                                                hypotheses[rows],
+                                                                best_ids[rows] - rows.start,
+                                                                best_word_ids[rows],
+                                                                seq_scores[rows])
 
             # offsetting since the returned smallest_k() indices were slice-relative
             best_ids[rows] += rows.start
@@ -541,7 +596,7 @@ def _sequential_topk(timestep: int,
                      best_ids: mx.nd.NDArray,
                      best_word_ids: mx.nd.NDArray,
                      sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
-                                                              List[ConstrainedHypothesis], mx.nd.NDArray]:
+                                                 List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -611,6 +666,7 @@ def _sequential_topk(timestep: int,
     # Sort the candidates into the allocated banks
     pruned_candidates = []  # type: List[ConstrainedCandidate]
     for i, cand in enumerate(sorted_candidates):
+        
         bank = cand.hypothesis.num_met()
 
         if bank_sizes[bank] > 0:
